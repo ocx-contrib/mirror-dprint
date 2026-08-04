@@ -1,0 +1,204 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's bare Linux keys honest, and restating it to tweak one runner
+# would drop them all without reddening anything.
+extends: ../mirror-base.yml
+
+name: dprint
+
+# Logical index package `dprint/dprint` at the physical path
+# `ghcr.io/ocx-contrib/dprint/dprint` — slash segments, never hyphen-flattened.
+# Two segments always; `dprint` is the project's own brand and its own org, so
+# the tool names itself. The first segment must be this repo's own GitHub
+# owner: GITHUB_TOKEN only authorises packages owned by the repo the workflow
+# runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/dprint/dprint
+
+source:
+  type: github_release
+  owner: dprint
+  repo: dprint
+  # ⚠ dprint tags carry NO "v" prefix — they are bare semver ("0.55.2", not
+  # "v0.55.2"). Verified against every tag back to 0.49.0; the scheme has never
+  # varied. A `^v…` pattern copied from a sibling mirror matches nothing here,
+  # and a tag_pattern matching nothing is a silently empty mirror.
+  tag_pattern: "^(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# Upstream ships BOTH a `-gnu` and a `-musl` Linux asset for each declared
+# arch, so the choice is a measurement, not a default. All four candidates were
+# byte-measured at BOTH ends of the mirrored range (0.55.0 and 0.55.2), plus
+# the musl pair at 0.55.1, because a toolchain can change mid-series — and here
+# it demonstrably did (see the gnu rows).
+#
+#   $ unzip -p dprint-x86_64-unknown-linux-musl.zip dprint > x && file x
+#   0.55.0: ELF 64-bit LSB pie executable, x86-64, static-pie linked
+#   0.55.1: ELF 64-bit LSB pie executable, x86-64, static-pie linked
+#   0.55.2: ELF 64-bit LSB pie executable, x86-64, static-pie linked
+#   $ readelf -l x | grep -c INTERP  → 0        (all three)
+#   $ readelf -d x | grep NEEDED     → (none)   (all three)
+#
+#   $ file dprint-aarch64-unknown-linux-musl/dprint
+#   0.55.0: ELF 64-bit LSB executable, ARM aarch64, statically linked
+#   0.55.1: ELF 64-bit LSB executable, ARM aarch64, statically linked
+#   0.55.2: ELF 64-bit LSB executable, ARM aarch64, statically linked
+#   $ readelf -l … | grep -c INTERP  → 0        (all three)
+#   $ readelf -d … | grep NEEDED     → (none)   (all three)
+#
+# No PT_INTERP and no DT_NEEDED on any musl artifact: musl is linked IN, not
+# linked AGAINST. The artifact requires nothing of the host, so both Linux keys
+# are BARE — no `+libc.*` suffix. Tagging them `+libc.musl` would be a false
+# requirement that hid the package from every glibc host it in fact runs on.
+# Container legs (ubuntu + alpine + fedora on both arches) live in
+# ../mirror-base.yml and are what turn that claim into evidence.
+#
+# `file` alone would NOT have been sufficient evidence: a UPX-packed binary
+# leaves no PT_INTERP and no section headers, so `file` calls even a
+# glibc-dynamic build "statically linked". Ruled out explicitly —
+#   $ strings -a dprint | grep -c '^UPX'                  → 0   (musl AND gnu)
+#   $ readelf -h dprint | grep 'Number of section headers' → 28
+# — so the readelf verdict above is the real linkage, not a packer stub.
+#
+# And the claim was cross-checked by EXECUTION, x86_64 at 0.55.2, under
+# `docker run --rm --network none`:
+#   musl build, ubuntu:24.04 → `dprint 0.55.2`, exit 0
+#   musl build, alpine:3.20  → `dprint 0.55.2`, exit 0
+#   musl build, fedora:40    → `dprint 0.55.2`, exit 0
+#   gnu  build, ubuntu:24.04 → `dprint 0.55.2`, exit 0
+#   gnu  build, alpine:3.20  → `exec …/dprint-gnu: no such file or directory`
+# That last line is the loader failing to find ld-linux — the exact
+# undiagnosable exec-time death a bare key on the gnu asset would have shipped
+# to every musl host. It is also the proof that the alpine leg's green is
+# reachable-red rather than a habit.
+#
+# The full smoke sequence (below, dprint/tests/smoke.star) was run in all three
+# images with `--network none` and passed identically, so no `containers[].setup`
+# line is needed: dprint shells out to nothing, needs no git, no CA bundle and
+# no egress for anything this test does.
+#
+# The `-gnu` twins are REJECTED, and not merely as redundant:
+#
+#   $ readelf -d dprint-x86_64-unknown-linux-gnu/dprint | grep NEEDED
+#   0.55.0: liblzma.so.5  libgcc_s.so.1  libm.so.6  libc.so.6  ld-linux-x86-64.so.2
+#   0.55.2: libm.so.6  libpthread.so.0  libc.so.6  libdl.so.2  ld-linux-x86-64.so.2
+#   $ readelf -V … | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+#   0.55.0 x86_64: GLIBC_2.34   0.55.0 aarch64: GLIBC_2.39
+#   0.55.2 x86_64: GLIBC_2.17   0.55.2 aarch64: GLIBC_2.17
+#
+# Two disqualifying facts there. (1) 0.55.0's gnu build pulls `liblzma.so.5`,
+# a runtime dependency beyond libc that `os.features` has NO WAY to express —
+# a consumer on a host without it gets an exec-time loader failure the package
+# never warned about. (2) The glibc floor MOVED inside a three-release range
+# (2.39 → 2.17 on aarch64), so the set of hosts the gnu key would run on is not
+# even stable across the versions this mirror carries. The static musl build
+# has neither problem and covers every Linux userland, which is why it is the
+# only Linux asset carried.
+#
+# ─── Scope + resolution (verified on EVERY in-range release) ────────────────
+#
+# The mirrored range is exactly 0.55.0, 0.55.1, 0.55.2 — three releases. Each
+# pattern below was matched against each release's full 17-asset list: EXACTLY
+# ONE match, every time, both ways. A pattern matching zero is silently skipped
+# rather than an error, which would yield a green run with a missing platform.
+#
+# Asset names here are Rust TARGET TRIPLES and carry NO version segment — they
+# are byte-identical across all three releases. That makes a name-based sanity
+# check blind to an upstream shipping the previous version's binaries under a
+# new tag, so it was checked by RUNNING each extracted binary instead:
+#   0.55.0/dprint --version → dprint 0.55.0
+#   0.55.1/dprint --version → dprint 0.55.1
+#   0.55.2/dprint --version → dprint 0.55.2
+# Each tag ships its own version. No release in the range is asset-less, so the
+# 0.55.0 floor needs no lift.
+#
+# Upstream also publishes, and this mirror deliberately does not carry:
+#   dprint-x86_64-unknown-linux-gnu.zip      — dynamic glibc; see the gate above
+#   dprint-aarch64-unknown-linux-gnu.zip     — dynamic glibc; see the gate above
+#   dprint-{x86_64,aarch64}-linux-android.zip        — Android is not an OCX os
+#   dprint-loongarch64-unknown-linux-{gnu,musl}.zip  — no OCX loong64 arch
+#   dprint-powerpc64le-unknown-linux-{gnu,musl}.zip  — no OCX ppc64le arch
+#   dprint-riscv64gc-unknown-linux-gnu.zip           — no OCX riscv64 arch
+#   dprint-x86_64-pc-windows-msvc-installer.exe      — a GUI installer, not the
+#                                                      binary archive
+#   SHASUMS256.txt                                   — checksum sidecar
+# ocx's Architecture enum expresses amd64 and arm64 only, so loongarch64,
+# powerpc64le and riscv64gc are not declarable platforms at all — not a
+# deliberate omission, an inexpressible one. The `-installer.exe` sibling is
+# excluded by the `\.zip$` end anchor, which is why every pattern is anchored
+# at BOTH ends.
+assets:
+  linux/amd64:
+    - "^dprint-x86_64-unknown-linux-musl\\.zip$"
+  linux/arm64:
+    - "^dprint-aarch64-unknown-linux-musl\\.zip$"
+  # ── Pass 2 (darwin) — uncomment together with ../mirror-base.yml's keys ────
+  # darwin/amd64:
+  #   - "^dprint-x86_64-apple-darwin\\.zip$"
+  # darwin/arm64:
+  #   - "^dprint-aarch64-apple-darwin\\.zip$"
+  # ── Pass 3 (windows) ──────────────────────────────────────────────────────
+  # windows/amd64:
+  #   - "^dprint-x86_64-pc-windows-msvc\\.zip$"
+  # windows/arm64:
+  #   - "^dprint-aarch64-pc-windows-msvc\\.zip$"
+
+# Every archive on every platform is a FLAT, SINGLE-FILE zip: `dprint`
+# (`dprint.exe` on Windows) alone at the archive root, no wrapper directory and
+# no sibling files at all. Verified with `unzip -l` on 0.55.0 and 0.55.2 across
+# linux + darwin + windows — 1 file, every time. So strip_components 0 on every
+# platform, the binary lands at the content root, and one metadata.json
+# (PATH = ${installPath}) serves all six.
+asset_type:
+  type: archive
+  strip_components: 0
+
+# FORCED by the flat archive, not chosen. `bin_scan` only inspects an
+# interface-visible `${installPath}/<dir>` PATH entry, and this archive has no
+# subdirectory to point one at, so both `auto` and `verify` fail spec load at
+# exit 65:
+#
+#   bin_scan is enabled but metadata.json declares no interface-visible
+#   ${installPath}/<dir> PATH entry — the verification would inspect no file and
+#   pass green whatever the archive contains.
+#
+# The `binaries` list in metadata.json is therefore hand-maintained, exactly as
+# that error directs. It is as short and stable as a list gets: the archive
+# contains exactly one file. Quoted so no YAML 1.1 reader folds the bare word
+# into boolean `false`.
+bin_scan: "off"
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 0.55.0 is the floor assigned by recon. Every release from here to 0.55.2
+  # resolves all six platforms, and each ships binaries reporting its own
+  # version.
+  min: "0.55.0"
+  new_per_run: 5
+  poll_interval: "32 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: dprint/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/dprint/dprint/license --jq '.license.spdx_id'
+  #   MIT
+  org.opencontainers.image.licenses: "MIT"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: dprint/dprint
+  fork: ocx-contrib/index

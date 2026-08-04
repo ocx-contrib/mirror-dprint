@@ -1,0 +1,109 @@
+# Shared base for every spec in this repository (dprint, the pluggable code
+# formatting platform).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# bin_scan, metadata, catalog, tests, versions, announce, annotations — stays
+# in that package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. Restate
+# `platforms:` IN FULL or not at all. dprint/mirror.yml deliberately does NOT
+# restate it, which removes that trap structurally.
+
+skip_prereleases: true
+cascade: true
+
+# New package. dprint versions are bare semver (`0.55.2`) carrying no `+build`
+# segment, so the fleet default applies with no exception — `normalize_version`
+# has nothing to refuse and `plan` skips nothing. A cascade tag (`latest`, `0`,
+# `0.55`) re-points on every re-publish; without a build segment the new
+# manifest would reuse the bare version tag and orphan the prior digest for
+# registry GC, breaking any `@sha256:` pin in a consumer's ocx.lock.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are ~10 MB zips around a single ~27 MB static binary (dprint embeds
+  # a wasmtime engine), so the bundles are large but few — three in-range
+  # versions × six platforms.
+  max_downloads: 6
+  max_bundles: 3
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built, and a musl target TRIPLE is not a musl
+# requirement. Upstream ships BOTH `-gnu` and `-musl` Linux assets for each
+# declared arch; this mirror carries the musl ones, and both were byte-measured
+# on both arches at BOTH ends of the mirrored range (0.55.0 and 0.55.2): no
+# PT_INTERP, no DT_NEEDED. musl is linked IN, not linked AGAINST. The full
+# measurement transcript — including why the `-gnu` twin was rejected — is
+# recorded above dprint/mirror.yml's `assets:`.
+#
+# So both Linux keys are BARE. `+libc.musl` would be a false requirement that
+# hid the package from every glibc host it in fact runs on.
+#
+# A bare key claims universality, so it must prove it: ubuntu (glibc) + alpine
+# (musl) + fedora (a different glibc vintage). The ALPINE LEG IS THE PROOF —
+# drop it and the universal claim is merely asserted.
+#
+# A future package here whose libc measurement differs must restate this whole
+# block in its own spec — see the shallow-merge warning at the top.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
+  # Kept commented in lockstep with the matching `assets:` keys in
+  # dprint/mirror.yml. A declared platform with no resolvable asset does not
+  # red — it boots a real runner and reports SUCCESS having tested nothing —
+  # so the platform key and its asset regex are uncommented in the SAME pass.
+  # darwin/amd64:
+  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  # ── Pass 3 (windows) ───────────────────────────────────────────────────────
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+  # windows/arm64:
+  #   # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64
+  #   # PE. Upstream ships dprint-aarch64-pc-windows-msvc.zip on every in-range
+  #   # release, so this leg resolves an asset and must exist here or push reds
+  #   # it as missing_junit.
+  #   runner: windows-11-arm
+  #   shell: pwsh
+  #
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures
