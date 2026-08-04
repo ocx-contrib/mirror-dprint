@@ -141,10 +141,10 @@ assets:
   darwin/arm64:
     - "^dprint-aarch64-apple-darwin\\.zip$"
   # ── Pass 3 (windows) ──────────────────────────────────────────────────────
-  # windows/amd64:
-  #   - "^dprint-x86_64-pc-windows-msvc\\.zip$"
-  # windows/arm64:
-  #   - "^dprint-aarch64-pc-windows-msvc\\.zip$"
+  windows/amd64:
+    - "^dprint-x86_64-pc-windows-msvc\\.zip$"
+  windows/arm64:
+    - "^dprint-aarch64-pc-windows-msvc\\.zip$"
 
 # Every archive on every platform is a FLAT, SINGLE-FILE zip: `dprint`
 # (`dprint.exe` on Windows) alone at the archive root, no wrapper directory and
