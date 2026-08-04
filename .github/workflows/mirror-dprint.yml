@@ -6,7 +6,7 @@ name: dprint
 
 on:
   schedule:
-    - cron: '32 */6 * * *'
+    - cron: '47 2-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
