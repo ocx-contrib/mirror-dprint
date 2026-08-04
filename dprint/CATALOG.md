@@ -54,17 +54,6 @@ dprint fmt --diff          # show what would change
 dprint file-paths          # what the config actually resolves to
 ```
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/dprint/dprint
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/dprint/dprint:0.55.2
-```
-
 ## Links
 
 - [dprint.dev](https://dprint.dev)
