@@ -136,10 +136,10 @@ assets:
   linux/arm64:
     - "^dprint-aarch64-unknown-linux-musl\\.zip$"
   # ── Pass 2 (darwin) — uncomment together with ../mirror-base.yml's keys ────
-  # darwin/amd64:
-  #   - "^dprint-x86_64-apple-darwin\\.zip$"
-  # darwin/arm64:
-  #   - "^dprint-aarch64-apple-darwin\\.zip$"
+  darwin/amd64:
+    - "^dprint-x86_64-apple-darwin\\.zip$"
+  darwin/arm64:
+    - "^dprint-aarch64-apple-darwin\\.zip$"
   # ── Pass 3 (windows) ──────────────────────────────────────────────────────
   # windows/amd64:
   #   - "^dprint-x86_64-pc-windows-msvc\\.zip$"
